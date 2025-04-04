@@ -1,7 +1,7 @@
 // Chat.js
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
-import { db } from '../../services/Firebase';
+import { db, storage } from '../../services/Firebase';
 import {
   collection,
   addDoc,
@@ -12,6 +12,11 @@ import {
   doc,
   getDoc,
 } from 'firebase/firestore';
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 import { useAuth } from '../../context/AuthContext';
 import './Chat.css';
 
@@ -23,6 +28,7 @@ function Chat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [otherUser, setOtherUser] = useState(state?.otherUser || null);
+  const [selectedImages, setSelectedImages] = useState([]);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -61,16 +67,34 @@ function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleImageSelect = (e) => {
+    const files = Array.from(e.target.files);
+    setSelectedImages(files);
+  };
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (input.trim()) {
+      await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+        text: input,
+        sender: user.uid,
+        timestamp: serverTimestamp(),
+      });
+      setInput('');
+    }
 
-    await addDoc(collection(db, 'rooms', roomId, 'messages'), {
-      text: input,
-      sender: user.uid,
-      timestamp: serverTimestamp(),
-    });
+    for (let image of selectedImages) {
+      const storageRef = ref(storage, `chatImages/${Date.now()}_${image.name}`);
+      await uploadBytes(storageRef, image);
+      const downloadURL = await getDownloadURL(storageRef);
 
-    setInput('');
+      await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+        imageUrl: downloadURL,
+        sender: user.uid,
+        timestamp: serverTimestamp(),
+      });
+    }
+
+    setSelectedImages([]);
   };
 
   return (
@@ -81,22 +105,37 @@ function Chat() {
 
       <div className="chat-messages">
         {messages.map((msg, index) => (
-          <div
-            key={index}
-            className={`message ${msg.sender === user.uid ? 'sent' : 'received'}`}
-          >
-            {msg.text}
+          <div key={index} className={`chat-bubble ${msg.sender === user.uid ? 'sent' : 'received'}`}>
+            {msg.text && <p>{msg.text}</p>}
+            {msg.imageUrl && <img src={msg.imageUrl} alt="Sent" className="chat-image" />}
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="chat-input">
+      <div className="chat-input-container">
         <input
+          type="text"
+          placeholder="Type your message..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
         />
+
+        <label className="image-upload-button">
+          📷
+          <input
+            type="file"
+            multiple
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleImageSelect}
+          />
+        </label>
+
+        {selectedImages.length > 0 && (
+          <div className="image-count">{selectedImages.length} selected</div>
+        )}
+
         <button onClick={sendMessage}>Send</button>
       </div>
     </div>
